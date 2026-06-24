@@ -1,6 +1,6 @@
 # Stock Bottom Watch
 
-日本株のウォッチリストをCSVで管理し、日足データから `DANGER` / `WAIT` / `BUY_CANDIDATE` / `MOMENTUM` / `OVERHEATED` / `NO_SIGNAL` をルール判定してDiscordに通知するMVPです。AI予測やWebアプリ化はまだ行わず、まず3営業日Discord通知を観察して、誤判定と通知ノイズを調整する方針です。
+日本株のウォッチリストをCSVで管理し、日足データから `DANGER` / `WAIT` / `BUY_CANDIDATE` / `MOMENTUM` / `OVERHEATED` / `NO_SIGNAL` をルール判定してDiscordに通知するアプリケーションです。AI予測やWebアプリ化はまだ行わず、まず3営業日Discord通知を観察して、誤判定と通知ノイズを調整する方針です。
 
 ## できること
 
