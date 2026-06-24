@@ -1,0 +1,73 @@
+name: Daily Stock Bottom Watch
+
+on:
+  schedule:
+    # 15:45 JST on weekdays = 06:45 UTC.
+    - cron: "45 6 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print the report without posting to Discord or updating state"
+        required: false
+        default: false
+        type: boolean
+      reset_state:
+        description: "Delete data/state.json before a normal run"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Prepare data directory
+        run: mkdir -p data
+
+      - name: Restore state/history cache
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: stock-state-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            stock-state-${{ runner.os }}-
+            stock-state-
+
+      - name: Validate manual inputs
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && inputs.reset_state }}
+        run: |
+          echo "::error::dry_run and reset_state cannot both be true."
+          exit 1
+
+      - name: Run stock bottom watch
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run }}" == "true" ]]; then
+            python src/main.py --dry-run
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.reset_state }}" == "true" ]]; then
+            python src/main.py --reset-state
+          else
+            python src/main.py
+          fi
+
+      - name: Save state/history cache
+        if: ${{ success() && !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        uses: actions/cache/save@v4
+        with:
+          path: data
+          key: stock-state-${{ runner.os }}-${{ github.run_id }}

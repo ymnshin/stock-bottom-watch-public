@@ -1,0 +1,17 @@
+lookback_days: 260
+near_low_threshold: 0.03
+rsi_oversold: 30
+rsi_recover: 35
+volume_spike_multiplier: 2.0
+ma_short: 25
+ma_mid: 75
+ma_long: 200
+max_discord_items: 10
+show_momentum: false
+show_overheated: false
+ma25_overheat_threshold: 0.08
+fetch_batch_size: 100
+fetch_threads: true
+use_history_cache: true
+history_cache_dir: data/history
+discord_report_mode: buy_candidates_summary
