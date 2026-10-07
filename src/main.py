@@ -28,6 +28,12 @@ def main() -> int:
         reset_state=args.reset_state,
         write_history_cache=not args.dry_run,
     )
+    logging.info(
+        "Analyzed %d/%d tickers; failures=%d; dry_run=%s",
+        len(result.analyses), len(result.watchlist_tickers), len(result.failures), args.dry_run,
+    )
+    if not result.analyses:
+        raise RuntimeError("No stocks could be analyzed; report and state update aborted")
     webhook_url = None if args.dry_run else os.getenv("DISCORD_WEBHOOK_URL")
     post_or_print(result.report, webhook_url)
 

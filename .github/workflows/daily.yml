@@ -3,7 +3,11 @@ name: Daily Stock Bottom Watch
 on:
   schedule:
     # 15:45 JST on weekdays = 06:45 UTC.
-    - cron: "45 6 * * 1-5"
+    - cron: "45 6 * * MON-FRI"
+  # Workflow maintenance is verified without sending notifications or saving data.
+  push:
+    branches: [main]
+    paths: [.github/workflows/daily.yml]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -17,29 +21,41 @@ on:
         default: false
         type: boolean
 
+concurrency:
+  group: stock-bottom-watch
+  cancel-in-progress: false
+
 jobs:
   notify:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
+    env:
+      DRY_RUN: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Test before dry run
+        if: ${{ env.DRY_RUN == 'true' }}
+        run: python -m pytest -q
+
       - name: Prepare data directory
         run: mkdir -p data
 
       - name: Restore state/history cache
-        uses: actions/cache/restore@v4
+        id: restore
+        uses: actions/cache/restore@v5
         with:
           path: data
           key: stock-state-${{ runner.os }}-${{ github.run_id }}
@@ -53,21 +69,84 @@ jobs:
           echo "::error::dry_run and reset_state cannot both be true."
           exit 1
 
+      - name: Check notification secret and restored data
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          CACHE_MATCHED_KEY: ${{ steps.restore.outputs.cache-matched-key }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, "src")
+          from state_store import load_status_state
+
+          root = Path("data")
+          state = load_status_state(root / "state.json")
+          history_count = len(list((root / "history").glob("*.csv")))
+          matched = os.environ.get("CACHE_MATCHED_KEY") or "MISS (cold start)"
+          configured = bool(os.environ.get("DISCORD_WEBHOOK_URL", "").strip())
+          updated = max((r.updated_at for r in state.records.values()), default="none")
+          checks = [
+              f"Cache: {matched}",
+              f"State restored: {state.exists}; tickers: {len(state.records)}; latest update: {updated}",
+              f"History CSV files: {history_count}",
+              f"DISCORD_WEBHOOK_URL configured: {configured}",
+              f"Dry run: {os.environ['DRY_RUN']}",
+          ]
+          for check in checks:
+              print(check)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("## Recovery checks\n\n" + "\n".join(f"- {c}" for c in checks) + "\n")
+          snapshot = {str(p): hashlib.sha256(p.read_bytes()).hexdigest()
+                      for p in root.rglob("*") if p.is_file()}
+          (Path(os.environ["RUNNER_TEMP"]) / "stock-watch-data-before.json").write_text(json.dumps(snapshot))
+          if not state.exists:
+              print("::warning::Previous state is unavailable; the next normal run will create a new baseline.")
+          if not configured:
+              level = "warning" if os.environ["DRY_RUN"] == "true" else "error"
+              print(f"::{level}::Set repository Actions secret DISCORD_WEBHOOK_URL before notification runs.")
+              if level == "error":
+                  raise SystemExit(1)
+          PY
+
       - name: Run stock bottom watch
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run }}" == "true" ]]; then
-            python src/main.py --dry-run
+          if [[ "$DRY_RUN" == "true" ]]; then
+            python src/main.py --dry-run | tee "$RUNNER_TEMP/stock-watch-report.txt"
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.reset_state }}" == "true" ]]; then
             python src/main.py --reset-state
           else
             python src/main.py
           fi
 
+      - name: Verify dry run preserved state/history and show report
+        if: ${{ env.DRY_RUN == 'true' }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          temp = Path(os.environ["RUNNER_TEMP"])
+          before = json.loads((temp / "stock-watch-data-before.json").read_text())
+          after = {str(p): hashlib.sha256(p.read_bytes()).hexdigest()
+                   for p in Path("data").rglob("*") if p.is_file()}
+          if before != after:
+              raise RuntimeError("Dry run modified data/state or history cache")
+          print("Dry run verified: state/history unchanged; cache save skipped.")
+          report = (temp / "stock-watch-report.txt").read_text()
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("\n## Dry-run report\n\n" + report + "\n\nState/history unchanged. Cache save skipped.\n")
+          PY
+
       - name: Save state/history cache
-        if: ${{ success() && !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
-        uses: actions/cache/save@v4
+        if: ${{ success() && env.DRY_RUN != 'true' }}
+        uses: actions/cache/save@v5
         with:
           path: data
           key: stock-state-${{ runner.os }}-${{ github.run_id }}

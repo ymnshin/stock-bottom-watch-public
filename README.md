@@ -114,13 +114,19 @@ discord_report_mode: buy_candidates_summary
 
 ## GitHub Actions 毎日自動通知
 
-[daily.yml](.github/workflows/daily.yml) は平日15:45 JST相当で自動実行します。cronはUTCなので `45 6 * * 1-5` です。
+[daily.yml](.github/workflows/daily.yml) は平日15:45 JST相当で自動実行します。cronはUTCなので `45 6 * * MON-FRI` です。GitHub側の混雑により開始は遅れることがあります。
 
-GitHub Actionsでは `data/state.json` と `data/history/` を `actions/cache/restore@v4` と `actions/cache/save@v4` で保持します。cache keyは `stock-state-${{ runner.os }}-${{ github.run_id }}` で、`github.run_id` を含むユニークkeyです。`restore-keys` は `stock-state-` プレフィックスで最新のstate/cacheを復元します。
+GitHub Actionsでは `data/state.json` と `data/history/` を `actions/cache/restore@v5` と `actions/cache/save@v5` で保持します。cache keyは `stock-state-${{ runner.os }}-${{ github.run_id }}` で、`github.run_id` を含むユニークkeyです。`restore-keys` は `stock-state-` プレフィックスで最新のstate/cacheを復元します。
+
+復旧確認では、ログと実行Summaryにcacheの復元key、stateの銘柄数・更新日時、日足CSV数、必要なSecretの有無を表示します。`dry_run` は通知・state/history更新・cache保存を行わず、実行前後のファイルハッシュでも保存状態の不変を確認します。`daily.yml` をmainへ更新したときも自動的にdry_runで検証します。
+
+GitHubのcacheは7日間アクセスがないと削除されます。長期停止後にcacheがない場合、過去のステータスは復元できません。日足は再取得でき、次の通常実行成功後に新しいstate/cacheを保存します。初回は各銘柄を未記録として扱います。
+
+公開リポジトリの定期実行は60日間リポジトリ活動がないと自動停止します。再発時はActions画面でEnable workflowを押すか、書き込み権限のあるユーザーがcronを編集してください。
 
 ### GitHub Secrets
 
-Discordへ通知するには、GitHub repositoryのSecretsに `DISCORD_WEBHOOK_URL` を登録します。
+Discordへ通知するには、GitHub repositoryのSecretsに `DISCORD_WEBHOOK_URL` を登録します。定期・通常手動実行では、このSecretが空なら送信前に失敗させます。dry_runでは未設定を警告し、送信せず内容を確認できます。毎日通知にSlash command用のSecretsは不要です。
 
 1. GitHub repositoryを開く
 2. `Settings` → `Secrets and variables` → `Actions`
